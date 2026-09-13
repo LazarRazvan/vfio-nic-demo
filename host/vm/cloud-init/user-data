@@ -1,0 +1,23 @@
+#cloud-config
+hostname: vfio-lab
+users:
+  - name: lab
+    groups: wheel
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAKjukLRY5zk6bMesz2pl86JfQULQpzTzZGlwC56/DEJ vfio-lab
+
+ssh_pwauth: false
+disable_root: true
+
+# Enable the IOMMU on next boot, then reboot once so it takes effect.
+# (Fedora cloud images boot via GRUB2 + grubby.)
+runcmd:
+  - [ grubby, --update-kernel=ALL, --args=intel_iommu=on ]
+  - [ dnf, -y, install, pciutils, kernel-devel ]
+
+power_state:
+  mode: reboot
+  message: rebooting to apply intel_iommu=on
+  condition: true

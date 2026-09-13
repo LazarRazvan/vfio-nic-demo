@@ -1,0 +1,10 @@
+# VM images and generated artifacts (large / regenerable / host-specific)
+host/vm/*.qcow2
+host/vm/seed.iso
+host/vm/ssh/id_ed25519
+host/vm/ssh/id_ed25519.pub
+
+# C build output
+src/*.o
+src/*.out
+/build/
