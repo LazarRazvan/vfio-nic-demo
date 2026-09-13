@@ -47,3 +47,37 @@ touches it anymore — only your userspace program will, via `/dev/vfio`.
 - `/sys/bus/pci/devices/<BDF>/driver_override`
 - `/sys/bus/pci/drivers_probe`
 - `/sys/bus/pci/devices/<BDF>/iommu_group`
+
+## Commands used (verified on this setup)
+
+Lab NIC is `0000:00:03.0`, alone in IOMMU group 3 (see `docs/00` /
+`host/vm/README.md`). Run inside the guest, over SSH:
+
+```sh
+# 1. confirm starting state
+lspci -k -s 0000:00:03.0                  # Kernel driver in use: e1000
+
+# 2. confirm the IOMMU group and its members
+readlink /sys/bus/pci/devices/0000:00:03.0/iommu_group
+ls /sys/kernel/iommu_groups/3/devices/     # only 0000:00:03.0
+
+# 3. load vfio-pci
+sudo modprobe vfio-pci
+
+# 4. detach the current driver
+echo 0000:00:03.0 | sudo tee /sys/bus/pci/devices/0000:00:03.0/driver/unbind
+
+# 5. force-bind to vfio-pci
+echo vfio-pci | sudo tee /sys/bus/pci/devices/0000:00:03.0/driver_override
+echo 0000:00:03.0 | sudo tee /sys/bus/pci/drivers_probe
+
+# 6. verify
+lspci -k -s 0000:00:03.0                  # Kernel driver in use: vfio-pci
+ls -la /dev/vfio/                         # /dev/vfio/3 now exists
+ip link                                   # enp0s3 is gone
+```
+
+Result: `0000:00:03.0` now shows `vfio-pci` as its driver, `/dev/vfio/3`
+exists, and `enp0s3` no longer appears in `ip link` — matching the
+checkpoint above. The connectivity NIC (`enp0s2`) and the SSH session
+itself are unaffected throughout.
