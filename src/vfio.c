@@ -7,11 +7,79 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <linux/vfio.h>
 
 #include "vfio.h"
+
+
+/*****************************************************************************/
+
+static inline void __vfio_device_get_region_info(int device_fd, uint32_t index)
+{
+	/**
+	 * Get device region config.
+	 */
+	struct vfio_region_info region = { .argsz = sizeof(region), .index = index };
+	if (ioctl(device_fd, VFIO_DEVICE_GET_REGION_INFO, &region) < 0) {
+		int saved_errno = errno;
+		fprintf(stderr, "Fail to get device %s region %d info: %s (errno=%d)\n",
+				VFIO_DEVICE_ID, index, strerror(saved_errno), saved_errno);
+		return;
+	}
+
+	//
+	printf("[%s] region %d: R(%u) W(%u) M(%u) C(%u); size %llu; offset 0x%llx\n",
+		VFIO_DEVICE_ID, index,
+		!!(region.flags & VFIO_REGION_INFO_FLAG_READ),
+		!!(region.flags & VFIO_REGION_INFO_FLAG_WRITE),
+		!!(region.flags & VFIO_REGION_INFO_FLAG_MMAP),
+		!!(region.flags & VFIO_REGION_INFO_FLAG_CAPS),
+		region.size, region.offset);
+
+	// validate vendor and device id (same as 'lspci -nn')
+	if (index == VFIO_PCI_CONFIG_REGION_INDEX) {
+		unsigned char buf[4];
+		int saved_errno = errno;
+
+		if (pread(device_fd, buf, 4, region.offset) < 0) {
+			fprintf(stderr, "Fail to get device %s vendor id: %s (errno=%d)\n",
+					VFIO_DEVICE_ID, strerror(saved_errno), saved_errno);
+			return;
+		}
+
+		uint16_t vendor = buf[0] | (buf[1] << 8);
+		uint16_t device = buf[2] | (buf[3] << 8);
+		printf("[%s] region %d: venodr %x; device %d\n", VFIO_DEVICE_ID, index,
+			vendor, device);
+	}
+}
+
+static void __vfio_device_get_info(int device_fd)
+{
+	/**
+	 * Get device capabilities.
+	 */
+	struct vfio_device_info info = { .argsz = sizeof(info) };
+	if (ioctl(device_fd, VFIO_DEVICE_GET_INFO, &info) < 0) {
+		int saved_errno = errno;
+		fprintf(stderr, "Fail to get device %s info: %s (errno=%d)\n",
+				VFIO_DEVICE_ID, strerror(saved_errno), saved_errno);
+		goto finish;
+	}
+
+	//
+	printf("[%s] num_regions %u; num_irqs %u\n", VFIO_DEVICE_ID,
+		info.num_regions, info.num_irqs);
+
+	// print regions
+	for (uint32_t i = 0; i < info.num_regions; i++)
+		__vfio_device_get_region_info(device_fd, i);
+
+finish:
+}
 
 
 /*****************************************************************************/
@@ -126,6 +194,11 @@ int main()
 	}
 
 	printf("Device %s successfully obtained (fd=%d)\n", VFIO_DEVICE_ID, device_fd);
+
+	/**
+	 * Get device capabilities.
+	 */
+	__vfio_device_get_info(device_fd);
 
 	return EXIT_SUCCESS;
 
