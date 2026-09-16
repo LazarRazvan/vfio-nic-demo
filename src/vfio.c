@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/vfio.h>
 
@@ -53,7 +54,7 @@ static inline void __vfio_device_get_region_info(const char *vfio_device_id,
 
 		uint16_t vendor = buf[0] | (buf[1] << 8);
 		uint16_t device = buf[2] | (buf[3] << 8);
-		printf("[%s] region %d: venodr %x; device %d\n", vfio_device_id, index,
+		printf("[%s] region %d: vendor %x; device %x\n", vfio_device_id, index,
 			vendor, device);
 	}
 }
@@ -101,7 +102,7 @@ static inline int __vfio_dev_device_open(const char *vfio_device_id, int group_f
 //success
 	return device_fd;
 error:
-	return EXIT_FAILURE;
+	return -1;
 }
 
 static inline void __vfio_dev_device_close(int device_fd)
@@ -164,7 +165,7 @@ static inline int __vfio_dev_group_open(const char *vfio_group_path,
 close_group:
 	close(group_fd);
 error:
-	return EXIT_FAILURE;
+	return -1;
 }
 
 static inline void __vfio_dev_group_close(int group_fd)
@@ -228,7 +229,7 @@ static inline int __vfio_dev_container_open(const char *vfio_container_path)
 close_container:
 	close(container_fd);
 error:
-	return EXIT_FAILURE;
+	return -1;
 }
 
 static inline void __vfio_dev_container_close(int container_fd)
@@ -239,6 +240,60 @@ static inline void __vfio_dev_container_close(int container_fd)
 
 /*****************************************************************************/
 
+//
+//
+//
+void *vfio_dev_map_region(vfio_dev_t *vfio_dev, uint32_t index, uint64_t *size)
+{
+	void *addr = NULL;
+
+	struct vfio_region_info region = { .argsz = sizeof(region), .index = index };
+	if (ioctl(vfio_dev->device_fd, VFIO_DEVICE_GET_REGION_INFO, &region) < 0) {
+		int saved_errno = errno;
+		fprintf(stderr, "Fail to get device region %d info: %s (errno=%d)\n",
+				index, strerror(saved_errno), saved_errno);
+		goto finish;
+	}
+
+	// map the region
+	addr = mmap(NULL, region.size, PROT_READ|PROT_WRITE, MAP_SHARED,
+				vfio_dev->device_fd, region.offset);
+	if (addr == MAP_FAILED) {
+		int saved_errno = errno;
+		fprintf(stderr, "Fail to map device %d region size %llu; offset %llu: "
+				"%s (errno=%d)\n", vfio_dev->device_fd, region.size,
+				region.offset, strerror(saved_errno), saved_errno);
+		addr = NULL; goto finish;
+	}
+
+	printf("Device %d region size %llu; offset %llu successfully mapped %p\n",
+		vfio_dev->device_fd, region.size, region.offset, addr);
+
+//success
+	*size = region.size;
+
+finish:
+	return addr;
+}
+
+void vfio_dev_unmap_region(void *addr, uint64_t size)
+{
+	// unmap region
+	if (munmap(addr, size) < 0) {
+		int saved_errno = errno;
+		fprintf(stderr, "Fail to unmap region addr %p; size %lu: "
+				"%s (errno=%d)\n", addr, size, strerror(saved_errno),
+				saved_errno);
+		return;
+	}
+
+	//
+	printf("Region addr %p size %lu successfully unmaped\n", addr, size);
+}
+
+//
+//
+//
 int vfio_dev_open(const char *vfio_container_path, const char *vfio_group_path,
 				const char *vfio_device_id, vfio_dev_t *vfio_dev)
 {
@@ -274,7 +329,7 @@ error:
 	return EXIT_FAILURE;
 }
 
-void vfio_device_close(vfio_dev_t *vfio_dev)
+void vfio_dev_close(vfio_dev_t *vfio_dev)
 {
 	__vfio_dev_device_close(vfio_dev->device_fd);
 	__vfio_dev_group_close(vfio_dev->group_fd);

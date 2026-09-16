@@ -2,7 +2,9 @@
  * Copyright (c) 2026 Razvan Lazar
  */
 
-#include "vfio.h"
+#include <stdlib.h>
+
+#include "e1000.h"
 
 
 /*****************************************************************************/
@@ -16,8 +18,15 @@
 
 int main()
 {
-	vfio_dev_t dev;
+	e1000_dev_t dev;
 
-	return vfio_dev_open(VFIO_CONTAINER_PATH, VFIO_GROUP_PATH, VFIO_DEVICE_ID,
-						&dev);
+	// open e1000 device
+	if (e1000_dev_open(VFIO_CONTAINER_PATH, VFIO_GROUP_PATH, VFIO_DEVICE_ID,
+					&dev))
+		return EXIT_FAILURE;
+
+	// close e1000 device
+	e1000_dev_close(&dev);
+
+	return EXIT_SUCCESS;
 }
