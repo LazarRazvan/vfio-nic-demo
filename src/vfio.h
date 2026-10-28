@@ -6,6 +6,45 @@
 #define _VFIO_H_
 
 #include <stdint.h>
+#include <stdio.h>
+
+
+/*****************************************************************************/
+//
+// Log config
+//
+#ifndef VFIO_INF_ENABLE
+#	define VFIO_INF_ENABLE		1
+#endif
+
+#ifndef VFIO_DBG_ENABLE
+#	define VFIO_DBG_ENABLE		1
+#endif
+
+#ifndef VFIO_ERR_ENABLE
+#	define VFIO_ERR_ENABLE		1
+#endif
+
+
+/*****************************************************************************/
+
+#if VFIO_INF_ENABLE
+#define VFIO_INF(fmt, ...)	fprintf(stdout, "vfio_inf: "fmt, ##__VA_ARGS__)
+#else
+#define VFIO_INF(fmt, ...)	do {} while (0)
+#endif
+
+#if VFIO_DBG_ENABLE
+#define VFIO_DBG(fmt, ...)	fprintf(stdout, "vfio_dbg: "fmt, ##__VA_ARGS__)
+#else
+#define VFIO_DBG(fmt, ...)	do {} while (0)
+#endif
+
+#if VFIO_ERR_ENABLE
+#define VFIO_ERR(fmt, ...)	fprintf(stderr, "vfio_err: "fmt, ##__VA_ARGS__)
+#else
+#define VFIO_ERR(fmt, ...)	do {} while (0)
+#endif
 
 
 /*****************************************************************************/
