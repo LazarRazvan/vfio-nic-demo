@@ -240,6 +240,55 @@ static inline void __vfio_dev_container_close(int container_fd)
 
 /*****************************************************************************/
 
+int vfio_dev_map_dma(vfio_dev_t *vfio_dev, void *vaddr, uint64_t size,
+						uint64_t iova, uint64_t flags)
+{
+	struct vfio_iommu_type1_dma_map dma_map = {
+		.argsz = sizeof(dma_map),
+		.flags = flags,
+		.vaddr = (__u64)vaddr,
+		.size  = size,
+		.iova  = iova
+	};
+
+	// map virtual address to iova (program the iommu)
+	if (ioctl(vfio_dev->container_fd, VFIO_IOMMU_MAP_DMA, &dma_map) < 0) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to map device %d vaddr %p, size %lu to iova %lx:"
+				" %s (errno=%d)\n", vfio_dev->device_fd, vaddr, size, iova,
+				strerror(saved_errno), saved_errno);
+		return -1;
+	}
+
+	VFIO_DBG("Successfully map device %d vaddr %p, size %lu to iova %lx\n",
+			vfio_dev->device_fd, vaddr, size, iova);
+	return 0;
+}
+
+int vfio_dev_unmap_dma(vfio_dev_t *vfio_dev, uint64_t size, uint64_t iova)
+{
+
+	struct vfio_iommu_type1_dma_unmap dma_unmap = {
+		.argsz = sizeof(dma_unmap),
+		.flags = 0,
+		.iova  = iova,
+		.size  = size
+	};
+
+	// unmap virtual address to iova
+	if (ioctl(vfio_dev->container_fd, VFIO_IOMMU_UNMAP_DMA, &dma_unmap) < 0) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to unmap device %d iova %lx size %lu: %s (errno=%d)\n",
+				vfio_dev->device_fd, iova, size, strerror(saved_errno),
+				saved_errno);
+		return -1;
+	}
+
+	VFIO_DBG("Successfully unmap device %d iova %lx, size %lu\n",
+			vfio_dev->device_fd, iova, size);
+	return 0;
+}
+
 //
 //
 //

@@ -44,7 +44,7 @@
 #endif
 
 #if E1000_ERR_ENABLE
-#define E1000_ERR(fmt, ...)	fprintf(stdout, "e1000_err: "fmt, ##__VA_ARGS__)
+#define E1000_ERR(fmt, ...)	fprintf(stderr, "e1000_err: "fmt, ##__VA_ARGS__)
 #else
 #define E1000_ERR(fmt, ...)	do {} while (0)
 #endif
@@ -72,6 +72,12 @@ typedef struct e1000_dev_s {
 	uint64_t			bar_size;
 	volatile uint32_t	*bar_addr;
 	vfio_dev_t			vfio_dev;
+
+	//
+	void				*rx_ring;
+	void				*tx_ring;
+	void				*rx_bufs;
+	void				*tx_bufs;
 
 } e1000_dev_t;
 
