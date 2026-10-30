@@ -7,8 +7,10 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <assert.h>
 
 #include "vfio.h"
+#include "e1000_regs.h"
 
 
 /*****************************************************************************/
@@ -44,7 +46,7 @@
 #endif
 
 #if E1000_ERR_ENABLE
-#define E1000_ERR(fmt, ...)	fprintf(stdout, "e1000_err: "fmt, ##__VA_ARGS__)
+#define E1000_ERR(fmt, ...)	fprintf(stderr, "e1000_err: "fmt, ##__VA_ARGS__)
 #else
 #define E1000_ERR(fmt, ...)	do {} while (0)
 #endif
@@ -52,26 +54,52 @@
 
 /*****************************************************************************/
 
+// true if the lowest 'bits' bits of 'addr' are zero (aligned to 2^bits bytes)
+#define E1000_IS_ALIGNED(addr, bits)	\
+	((((uint64_t)(addr)) & ((1ULL << (bits)) - 1)) == 0)
+
+// low / high 32 bits of a value (e.g. split a 64-bit iova in two registers);
+// the value is widened to 64 bits first, so the shift is always valid
+#define E1000_LOWER_32_BITS(val)		\
+	((uint32_t)(((uint64_t)(val)) & 0xFFFFFFFFULL))
+#define E1000_UPPER_32_BITS(val)		\
+	((uint32_t)(((uint64_t)(val)) >> 32))
+
+
+/*****************************************************************************/
+
 #define E1000_REGISTERS_BAR_INDEX		0
 
-#define E1000_CTRL						0x0000
-#define E1000_STATUS					0x0008
+/*****************************************************************************/
 
-#define E1000_STATUS_FD					(1 << 0)	// full duplex
-#define E1000_STATUS_LU					(1 << 1)	// link up
+// rx ring descriptor (16 bytes)
+typedef struct e1000_rx_desc_s {
 
-#define E1000_CTRL_SLU					(1 << 6)	// Set Link Up
-#define E1000_CTRL_LRST					(1 << 3)	// Link Reset
-#define E1000_CTRL_RST					(1 << 26)	// Global device Reset
+	uint64_t			buf_iova;
+	uint16_t			length;
+	uint16_t			checksum;
+	uint8_t				status;
+	uint8_t				errors;
+	uint16_t			special;
+
+} e1000_rx_desc_t;
+
+static_assert(sizeof(e1000_rx_desc_t) == 16, "sizeof(e1000_rx_desc_t)");
 
 
 /*****************************************************************************/
 
 typedef struct e1000_dev_s {
 
-	uint64_t			bar_size;
-	volatile uint32_t	*bar_addr;
-	vfio_dev_t			vfio_dev;
+	uint64_t					bar_size;
+	volatile uint32_t			*bar_addr;
+	vfio_dev_t					vfio_dev;
+	//
+	void						*rx_bufs;
+	void						*tx_bufs;
+	//
+	volatile e1000_rx_desc_t	*rx_ring;
+	void						*tx_ring;
 
 } e1000_dev_t;
 

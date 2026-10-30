@@ -7,6 +7,22 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <assert.h>
+
+
+/*****************************************************************************/
+
+/**
+ * Host byte order assumption.
+ *
+ * PCI config space is little endian by specification, and the e1000 also
+ * defines its BAR0 registers and DMA descriptors as little endian. This code
+ * accesses all of them with plain loads/stores (pread/pwrite into native
+ * integers, volatile MMIO dereference, descriptor struct fields), without any
+ * byte swapping (le16toh/htole32, ...), which is only correct when the host
+ * is little endian too (e.g. x86_64).
+ */
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "host big endian");
 
 
 /*****************************************************************************/
@@ -61,8 +77,16 @@ typedef struct vfio_dev_s {
 /*****************************************************************************/
 
 //
+int vfio_dev_map_dma(vfio_dev_t *vfio_dev, void *vaddr, uint64_t size,
+						uint64_t iova, uint64_t flags);
+int vfio_dev_unmap_dma(vfio_dev_t *vfio_dev, uint64_t size, uint64_t iova);
+
+//
 void *vfio_dev_map_region(vfio_dev_t *vfio_dev, uint32_t index, uint64_t *size);
 void vfio_dev_unmap_region(void *addr, uint64_t size);
+
+//
+int vfio_dev_enable_bus_master(vfio_dev_t *vfio_dev);
 
 //
 int vfio_dev_open(const char *vfio_container_path, const char *vfio_group_path,

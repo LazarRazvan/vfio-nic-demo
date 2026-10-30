@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/vfio.h>
+#include <linux/pci_regs.h>
 
 #include "vfio.h"
 
@@ -240,6 +241,55 @@ static inline void __vfio_dev_container_close(int container_fd)
 
 /*****************************************************************************/
 
+int vfio_dev_map_dma(vfio_dev_t *vfio_dev, void *vaddr, uint64_t size,
+						uint64_t iova, uint64_t flags)
+{
+	struct vfio_iommu_type1_dma_map dma_map = {
+		.argsz = sizeof(dma_map),
+		.flags = flags,
+		.vaddr = (__u64)vaddr,
+		.size  = size,
+		.iova  = iova
+	};
+
+	// map virtual address to iova (program the iommu)
+	if (ioctl(vfio_dev->container_fd, VFIO_IOMMU_MAP_DMA, &dma_map) < 0) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to map device %d vaddr %p, size %lu to iova %lx:"
+				" %s (errno=%d)\n", vfio_dev->device_fd, vaddr, size, iova,
+				strerror(saved_errno), saved_errno);
+		return -1;
+	}
+
+	VFIO_DBG("Successfully map device %d vaddr %p, size %lu to iova %lx\n",
+			vfio_dev->device_fd, vaddr, size, iova);
+	return 0;
+}
+
+int vfio_dev_unmap_dma(vfio_dev_t *vfio_dev, uint64_t size, uint64_t iova)
+{
+
+	struct vfio_iommu_type1_dma_unmap dma_unmap = {
+		.argsz = sizeof(dma_unmap),
+		.flags = 0,
+		.iova  = iova,
+		.size  = size
+	};
+
+	// unmap virtual address to iova
+	if (ioctl(vfio_dev->container_fd, VFIO_IOMMU_UNMAP_DMA, &dma_unmap) < 0) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to unmap device %d iova %lx size %lu: %s (errno=%d)\n",
+				vfio_dev->device_fd, iova, size, strerror(saved_errno),
+				saved_errno);
+		return -1;
+	}
+
+	VFIO_DBG("Successfully unmap device %d iova %lx, size %lu\n",
+			vfio_dev->device_fd, iova, size);
+	return 0;
+}
+
 //
 //
 //
@@ -289,6 +339,73 @@ void vfio_dev_unmap_region(void *addr, uint64_t size)
 
 	//
 	VFIO_INF("Region addr %p size %lu successfully unmaped\n", addr, size);
+}
+
+//
+//
+//
+int vfio_dev_enable_bus_master(vfio_dev_t *vfio_dev)
+{
+	uint16_t cmd;
+	off_t cmd_offset;
+
+	/**
+	 * Bus Master Enable lives in the PCI Command register of the config space
+	 * (not in a BAR). Without it the device cannot issue DMA, so it can not
+	 * read descriptors or write packets into our iova mapped memory.
+	 *
+	 * Config space is accessed with pread/pwrite at the config region offset
+	 * (it can not be mmap-ed like a BAR).
+	 */
+	struct vfio_region_info region = {
+		.argsz = sizeof(region),
+		.index = VFIO_PCI_CONFIG_REGION_INDEX
+	};
+	if (ioctl(vfio_dev->device_fd, VFIO_DEVICE_GET_REGION_INFO, &region) < 0) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to get device %d config region info: %s (errno=%d)\n",
+				vfio_dev->device_fd, strerror(saved_errno), saved_errno);
+		return -1;
+	}
+
+	cmd_offset = region.offset + PCI_COMMAND;
+
+	// read the command register (16 bits, little endian, same as host)
+	if (pread(vfio_dev->device_fd, &cmd, sizeof(cmd), cmd_offset) != sizeof(cmd)) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to read device %d PCI command: %s (errno=%d)\n",
+				vfio_dev->device_fd, strerror(saved_errno), saved_errno);
+		return -1;
+	}
+
+	VFIO_DBG("Device %d PCI command 0x%x\n", vfio_dev->device_fd, cmd);
+
+	// set bus master enable bit and write it back
+	cmd |= PCI_COMMAND_MASTER;
+	if (pwrite(vfio_dev->device_fd, &cmd, sizeof(cmd), cmd_offset) != sizeof(cmd)) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to write device %d PCI command: %s (errno=%d)\n",
+				vfio_dev->device_fd, strerror(saved_errno), saved_errno);
+		return -1;
+	}
+
+	// read back to validate the bit is set
+	if (pread(vfio_dev->device_fd, &cmd, sizeof(cmd), cmd_offset) != sizeof(cmd)) {
+		int saved_errno = errno;
+		VFIO_ERR("Fail to read device %d PCI command: %s (errno=%d)\n",
+				vfio_dev->device_fd, strerror(saved_errno), saved_errno);
+		return -1;
+	}
+
+	if (!(cmd & PCI_COMMAND_MASTER)) {
+		VFIO_ERR("Fail to enable device %d bus master (PCI command 0x%x)\n",
+				vfio_dev->device_fd, cmd);
+		return -1;
+	}
+
+	VFIO_INF("Device %d bus master successfully enabled (PCI command 0x%x)\n",
+			vfio_dev->device_fd, cmd);
+	return 0;
 }
 
 //
