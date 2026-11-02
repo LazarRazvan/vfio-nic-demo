@@ -432,6 +432,9 @@ static int __e1000_dev_set_rx(e1000_dev_t *dev)
 	E1000_DBG("Device %d RX successfully configured...\n",
 			dev->vfio_dev.device_fd);
 
+	// intialize software available descriptor
+	dev->rx_ring_idx = 0;
+
 //success:
 	return 0;
 
@@ -500,4 +503,42 @@ void e1000_dev_close(e1000_dev_t *e1000_dev)
 	__e1000_unmap_data(e1000_dev);
 	vfio_dev_unmap_region((void *)e1000_dev->bar_addr, e1000_dev->bar_size);
 	vfio_dev_close(&e1000_dev->vfio_dev);
+}
+
+//
+int e1000_dev_rx_poll(e1000_dev_t *dev, void *buf, uint16_t size, uint16_t *len)
+{
+	volatile e1000_rx_desc_t *rx_desc;
+
+	/**
+	 * Read first packet and inspect if it is written by NIC. At this moment,
+	 * we will consider a packet done, if status bits contain the descriptor
+	 * done and end of packet bits. (we do not consider here the packets
+	 * spanning over more than one descriptor).
+	 */
+	rx_desc = &dev->rx_ring[dev->rx_ring_idx];
+
+	// no packet received
+	if (!(rx_desc->status & E1000_RX_DESC_STATUS_DD))
+		return E1000_NO_PKT;
+
+	// fragmented packet
+	if (!(rx_desc->status & E1000_RX_DESC_STATUS_EOP))
+		return E1000_PKT_FRGMT;
+
+	// we have a packet, make sure it fits our buffer
+	if (size < rx_desc->length)
+		return E1000_PKT_NO_MEM;
+
+	//
+	memcpy(buf, dev->rx_bufs + dev->rx_ring_idx * E1000_RX_BUF_SIZE,
+		rx_desc->length);
+	*len = rx_desc->length;
+
+	// reset status register, software index and hardware tail
+	rx_desc->status = 0;
+	e1000_write32(dev, E1000_RDT, dev->rx_ring_idx);
+	dev->rx_ring_idx = (dev->rx_ring_idx + 1) & (E1000_RX_RING_DESC - 1);
+
+	return E1000_PKT_SUCCESS;
 }

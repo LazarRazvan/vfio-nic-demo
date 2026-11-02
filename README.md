@@ -30,12 +30,43 @@ That is exactly the shape of the model built up in the DPDK/VFIO
 discussion this repo grew out of, and DPDK ships a real `e1000`/`em`
 PMD you can diff your own code against once it works.
 
+## Implementation
+
+The code is split into a generic layer and a chip-specific layer:
+
+- **`src/vfio.c` / `src/vfio.h`** — the generic VFIO mechanism, with no
+  knowledge of `e1000` at all: open/close the container → group →
+  device chain, map a device's BAR into our address space, map/unmap
+  process memory into the device's IOVA space for DMA, and enable PCI
+  bus mastering.
+- **`src/e1000_regs.h`** — register offsets and bit definitions, taken
+  directly from the Intel 8254x datasheet.
+- **`src/e1000.h` / `src/e1000.c`** — chip-specific logic built on top
+  of `vfio.c`: reset/link-up sequencing, masking interrupts (this is a
+  polling-mode design, like DPDK's PMDs), allocating DMA-backed RX/TX
+  rings and buffer pools, programming the RX ring (base address,
+  length, head/tail, multicast table, control register), and
+  `e1000_dev_rx_poll()` — checks the next expected descriptor for
+  completion, copies the frame out of its DMA buffer, and recycles the
+  descriptor back to the NIC by advancing the tail register.
+- **`src/main.c`** — opens the device, polls in a loop, hex-dumps
+  whatever it receives.
+
+**Currently working, verified end-to-end:** a real Ethernet frame
+injected from the host (e.g. `arping` targeting the `tap0` device that
+backs the lab NIC) is DMA'd by the NIC into userspace memory and read
+back purely by polling the RX descriptor ring — no kernel network
+driver involved on the guest side at all.
+
+**Not yet implemented:** the TX path (construct and transmit a frame),
+and interrupt-driven operation (currently polling-only).
+
 ## Repo layout
 
 ```
-docs/     one file per stage: goal, concepts, checkpoint, references
+docs/     development notes, one file per stage worked through
 host/     notes + commands for the QEMU VM and vfio-pci binding
-src/      your C implementation (intentionally empty — see docs/)
+src/      the C implementation
 ```
 
 ## Prerequisites
@@ -49,16 +80,14 @@ src/      your C implementation (intentionally empty — see docs/)
   Controllers Software Developer's Manual** is the primary reference
   for every register offset used in this lab
 
-## How to use this repo
+## Build & run
 
-Work through `docs/00-...` to `docs/10-...` in order. Each stage:
+```sh
+cd src && make
+sudo ./vfio_lab
+```
 
-1. States the **goal** — what capability you're adding
-2. Lists the **concepts** it depends on
-3. Gives a **checkpoint** — an observable result proving it worked
-4. Points to the exact **references** (datasheet section, kernel doc,
-   VFIO header) you need, without giving you the code
-
-Implement each stage in `src/` yourself before moving to the next one.
-Nothing under `src/` is pre-written on purpose — the point of the lab
-is writing the ioctl/mmap sequences yourself.
+`main.c` hardcodes the VFIO container/group paths and the device's
+PCI BDF for this lab's setup (`/dev/vfio/vfio`, `/dev/vfio/3`,
+`0000:00:03.0`) — adjust them to match your own `lspci`/IOMMU group if
+you're not using the VM scaffolding under `host/`.

@@ -70,6 +70,16 @@
 
 #define E1000_REGISTERS_BAR_INDEX		0
 
+
+/*****************************************************************************/
+
+// pooling functions return codes
+#define E1000_PKT_SUCCESS				0
+#define E1000_NO_PKT					-1
+#define E1000_PKT_FRGMT					-2
+#define E1000_PKT_NO_MEM				-3
+
+
 /*****************************************************************************/
 
 // rx ring descriptor (16 bytes)
@@ -100,6 +110,8 @@ typedef struct e1000_dev_s {
 	//
 	volatile e1000_rx_desc_t	*rx_ring;
 	void						*tx_ring;
+	//
+	int							rx_ring_idx;
 
 } e1000_dev_t;
 
@@ -122,6 +134,9 @@ static inline void e1000_write32(e1000_dev_t *dev, uint32_t reg, uint32_t val)
 int e1000_dev_open(const char *vfio_container_path, const char *vfio_group_path,
 				const char *vfio_device_id, e1000_dev_t *e1000_dev);
 void e1000_dev_close(e1000_dev_t *e1000_dev);
+
+//
+int e1000_dev_rx_poll(e1000_dev_t *dev, void *buf, uint16_t size, uint16_t *len);
 
 #endif	// _E1000_H_
 
